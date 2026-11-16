@@ -311,3 +311,55 @@ test('text decoder does not mutate a Uint8Array or its backing bytes', () => {
   assert.equal(new Text().decode(bytes.subarray(1, 6)), 'hello');
   assert.deepEqual(bytes, before);
 });
+
+
+test('text encoder handles ASCII, Unicode, newlines and empty Uint8Array', () => {
+  const serializer = new Text();
+  for (const value of ['', 'hello', 'café ☕', 'one\ntwo', '終わり']) {
+    const bytes = Uint8Array.from(Buffer.from(value, 'utf8'));
+    assert.equal(serializer.encode({ body: bytes }), value);
+  }
+});
+
+test('text encoder respects byteOffset and byteLength without mutation', () => {
+  const content = Buffer.from('café ☕\nline two', 'utf8');
+  const source = Uint8Array.from(Buffer.concat([Buffer.from('BAD'), content, Buffer.from('BAD')]));
+  const original = Uint8Array.from(source);
+  const subarray = source.subarray(3, 3 + content.length);
+  const request = Object.freeze({ body: subarray });
+  assert.equal(new Text().encode(request), 'café ☕\nline two');
+  assert.deepEqual(source, original);
+  assert.equal(request.body, subarray);
+});
+
+test('text encoder preserves leading and embedded Unicode BOMs', () => {
+  const text = '\uFEFFfirst\uFEFFsecond';
+  const bytes = Uint8Array.from(Buffer.from(text, 'utf8'));
+  assert.equal(new Text().encode({ body: bytes }), text);
+});
+
+test('text encoder preserves existing conversions of other body types', () => {
+  const serializer = new Text();
+  const bodies = [[undefined, ''], [null, ''], ['', ''], ['a', 'a'], [0, '0'], [false, 'false'],
+    [Buffer.from('café ☕', 'utf8'), 'café ☕'], [new Uint16Array([65, 66]), '65,66'],
+    [{ toString() { return 'custom'; } }, 'custom']];
+  for (const [body, expected] of bodies) {
+    assert.equal(serializer.encode({ body }), expected);
+  }
+  assert.equal(serializer.encode({}), '');
+});
+
+test('text encoder leaves Text.decode and contentType unchanged', () => {
+  const serializer = new Text();
+  assert.equal(serializer.decode(Uint8Array.from(Buffer.from('café'))), 'café');
+  assert.equal(serializer.decode(undefined), '');
+  assert.equal(serializer.decode('hello'), 'hello');
+  assert.ok(serializer.contentType().test('text/plain'));
+  assert.equal(serializer.contentType().test('application/json'), false);
+});
+
+test('text encoder preserves custom Buffer toString overrides', () => {
+  const body = Buffer.from('café ☕');
+  body.toString = function () { return 'overridden'; };
+  assert.equal(new Text().encode({ body }), 'overridden');
+});
